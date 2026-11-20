@@ -1,44 +1,93 @@
 import { useCallback, useEffect, useState } from 'react'
-import { hldLldSteps, modules, parseRoute } from './curriculum/lessons'
+import { curriculumModules, lessonById, lessons, parseAcademyRoute } from './curriculum/catalog'
 import { Scene } from './scene-engine/Scene'
 import './App.css'
-const themeKey='sda:theme:v1',progressKey='sda:progress:v1'
-function storedTheme(){try{return localStorage.getItem(themeKey)==='dark'?'dark':'light'}catch{return 'light'}}
-function storedDone(){try{return localStorage.getItem(progressKey)==='complete'}catch{return false}}
-function routeNow(){return parseRoute(location.hash)}
+
+const themeKey = 'sda:theme:v1'
+const progressKey = 'sda:progress:v2'
+const legacyProgressKey = 'sda:progress:v1'
+type Theme = 'light' | 'dark'
+function storedTheme():Theme { try {return localStorage.getItem(themeKey)==='dark'?'dark':'light'} catch {return 'light'} }
+function storedDone():string[] { try {
+  const raw=JSON.parse(localStorage.getItem(progressKey) ?? '[]')
+  if(Array.isArray(raw))return raw.filter((value):value is string=>typeof value==='string')
+} catch {/* ignore invalid local storage */}
+  try {return localStorage.getItem(legacyProgressKey)==='complete'?['hld-lld']:[]} catch {return []}
+}
+function currentRoute(){return parseAcademyRoute(location.hash)}
 function App(){
- const [route,setRoute]=useState(routeNow)
- const [theme,setTheme]=useState(storedTheme)
- const [done,setDone]=useState(storedDone)
- const [playing,setPlaying]=useState(true)
- const [replayKey,setReplayKey]=useState(0)
- const [query,setQuery]=useState('')
- const [searchOpen,setSearchOpen]=useState(false)
- useEffect(()=>{const update=()=>{setRoute(routeNow());setPlaying(true)};window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update)},[])
- useEffect(()=>{document.documentElement.dataset.theme=theme;try{localStorage.setItem(themeKey,theme)}catch{/* optional storage */}},[theme])
- const go=useCallback((step:number)=>{location.hash=`/hld-lld/${step}`},[])
- const stepIndex=route.step-1,step=hldLldSteps[stepIndex]
- useEffect(()=>{const onKey=(e:KeyboardEvent)=>{
-  const target=e.target as HTMLElement | null
-  if(e.ctrlKey||e.metaKey){if(e.key.toLowerCase()==='k'){e.preventDefault();setSearchOpen(v=>!v)}return}
-  if(searchOpen||target?.matches('input,textarea,select,[contenteditable="true"]')){if(e.key==='Escape')setSearchOpen(false);return}
-  if(route.view!=='lesson')return
-  if(e.key==='ArrowRight'&&route.step<hldLldSteps.length){e.preventDefault();go(route.step+1)}
-  if(e.key==='ArrowLeft'&&route.step>1){e.preventDefault();go(route.step-1)}
-  if(e.key.toLowerCase()==='r'){setReplayKey(v=>v+1);setPlaying(true)}
-  if(e.code==='Space'){e.preventDefault();setPlaying(v=>!v)}
- };window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)},[go,route,searchOpen])
- const searchResults=modules.flatMap(m=>m.topics.map(t=>({...t,module:m.title}))).filter(t=>`${t.name} ${t.module}`.toLowerCase().includes(query.toLowerCase())).slice(0,12)
- return <div className="app-shell">
-  <header className="topbar"><a href="#/" className="brand"><span className="brand-icon">◇</span><span>DESIGNED <em>TO</em> SCALE</span></a><div className="top-links"><a href="#/">Curriculum</a><span title="Planned for a future release">Practice · soon</span><span title="Planned for a future release">Design Lab · soon</span></div><div className="actions"><button onClick={()=>setSearchOpen(true)} aria-label="Search lessons" className="search-trigger">⌕ <span>Search</span> <kbd>⌘ K</kbd></button><button onClick={()=>setTheme(t=>t==='light'?'dark':'light')} aria-label="Toggle theme">{theme==='light'?'☾':'☀'}</button></div></header>
-  <div className="layout"><aside className="sidebar"><div className="sidebar-head">THE CURRICULUM <span>9 MODULES · 40 TOPICS</span></div><div className="module-list">{modules.map((m,i)=><details key={m.id} open={m.id==='whole'}><summary><span className="module-number">{String(i+1).padStart(2,'0')}</span>{m.title}<span className="count">{m.topics.length}</span></summary><div className="topic-list">{m.topics.map(t=><button key={t.id} disabled={!t.available} title={t.available?undefined:'Content planned — not yet implemented'} className={t.available&&route.view==='lesson'?'active':''} onClick={()=>t.available&&go(1)}>{t.name}{!t.available&&<small>Planned</small>}{t.available&&done&&<span>✓</span>}</button>)}</div></details>)}</div><div className="sidebar-bottom">{done?'✓ HLD vs LLD completed':'Complete your first lesson to track progress'}<small>Progress is saved locally in this browser.</small></div></aside>
-   <main className="main-area">{route.view==='not-found'?<div className="welcome"><span className="eyebrow">ROUTE NOT FOUND</span><h1>That lesson step doesn’t exist.</h1><p>Choose a valid lesson from the curriculum.</p><a className="primary-link" href="#/">Back to curriculum</a></div>:route.view==='home'?<div className="welcome"><span className="eyebrow">AN INTERACTIVE SYSTEM DESIGN LEARNING LAB</span><h1>See how systems<br/><i>actually work.</i></h1><p>Learn distributed system architecture through original visual stories, step-by-step diagrams, and practical engineering trade-offs.</p><div className="overview-stats"><div><strong>09</strong><span>Modules planned</span></div><div><strong>40</strong><span>Topics mapped</span></div><div><strong>01</strong><span>Lesson available</span></div></div><button className="primary" onClick={()=>go(1)}>Explore HLD vs LLD →</button><p className="disclaimer">Early access · The remaining lessons are planned, not complete.</p></div>:<>
-    <div className="lesson-head"><div><span className="eyebrow">WHOLE SYSTEMS / LESSON 01</span><h1>High-Level Design <span>vs.</span> Low-Level Design</h1><p>Understand how architectural decisions become implementable systems.</p></div><span className="step-pill">STEP {route.step.toString().padStart(2,'0')} / {hldLldSteps.length}</span></div>
-    <div className="player-grid"><div className="canvas-panel"><div className="panel-top"><span>◈ ARCHITECTURE VISUALIZER</span><span className="live-dot">● {playing?'PLAYING':'PAUSED'}</span></div><Scene step={step} playing={playing} replayKey={replayKey}/><div className="controls"><button disabled={route.step===1} onClick={()=>go(route.step-1)}>← Previous</button><button onClick={()=>{setReplayKey(v=>v+1);setPlaying(true)}} aria-label="Replay animation">↺ Replay</button><button onClick={()=>setPlaying(p=>!p)} aria-label={playing?'Pause animation':'Play animation'}>{playing?'Ⅱ Pause':'▶ Play'}</button><button disabled={route.step===hldLldSteps.length} className="next" onClick={()=>go(route.step+1)}>Next step →</button></div></div>
-    <article className="explanation"><span className={`category ${step.category}`}>{step.category.toUpperCase()}</span><h2>{step.title}</h2><p>{step.body}</p>{step.metric&&<div className="metric">{step.metric}<small>Assumption · not measured</small></div>}<div className="takeaway"><span>KEY TAKEAWAY</span><strong>{step.takeaway}</strong></div>{route.step===hldLldSteps.length&&<button className="primary complete" onClick={()=>{setDone(true);try{localStorage.setItem(progressKey,'complete')}catch{/* optional storage */}}}>{done?'✓ Lesson completed':'Mark lesson complete ✓'}</button>}<div className="shortcuts">← → Navigate &nbsp; · &nbsp; Space Pause &nbsp; · &nbsp; R Replay</div></article></div>
-    <div className="lesson-progress" aria-label={`${route.step} of ${hldLldSteps.length} steps`}><div style={{width:`${route.step/hldLldSteps.length*100}%`}}/></div>
-   </>}</main></div>
-  {searchOpen&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSearchOpen(false)}}><div className="search-dialog" role="dialog" aria-modal="true" aria-label="Search curriculum"><div className="search-input"><span>⌕</span><input autoFocus placeholder="Search topics and modules…" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape')setSearchOpen(false);if(e.key==='Enter'&&searchResults[0]?.available){go(1);setSearchOpen(false)}}}/><button onClick={()=>setSearchOpen(false)}>Esc ✕</button></div><div className="search-results">{searchResults.length?searchResults.map(t=><button key={t.id} disabled={!t.available} onClick={()=>{go(1);setSearchOpen(false)}}><strong>{t.name}</strong><span>{t.module} · {t.available?'Open lesson':'Planned'}</span></button>):<p>No matching topics</p>}</div></div></div>}
- </div>
+  const [route,setRoute]=useState(currentRoute)
+  const [theme,setTheme]=useState(storedTheme)
+  const [completed,setCompleted]=useState(storedDone)
+  const [playing,setPlaying]=useState(true)
+  const [replayKey,setReplayKey]=useState(0)
+  const [query,setQuery]=useState('')
+  const [searchOpen,setSearchOpen]=useState(false)
+  const lesson=lessonById.get(route.lessonId) ?? lessons[0]
+  const step=lesson.steps[route.step-1] ?? lesson.steps[0]
+  const go=useCallback((id:string,number=1)=>{location.hash=`/${id}/${number}`},[])
+  useEffect(()=>{const update=()=>{setRoute(currentRoute());setPlaying(true)};window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update)},[])
+  useEffect(()=>{document.documentElement.dataset.theme=theme;try{localStorage.setItem(themeKey,theme)}catch{/* storage optional */}},[theme])
+  useEffect(()=>{try{localStorage.setItem(progressKey,JSON.stringify(completed))}catch{/* storage optional */}},[completed])
+  useEffect(()=>{const onKey=(event:KeyboardEvent)=>{
+    const target=event.target as HTMLElement|null
+    if(event.ctrlKey||event.metaKey){if(event.key.toLowerCase()==='k'){event.preventDefault();setSearchOpen(open=>!open)}return}
+    if(searchOpen||target?.matches('input,textarea,select,[contenteditable="true"]')){
+      if(event.key==='Escape')setSearchOpen(false)
+      return
+    }
+    if(route.view!=='lesson')return
+    if(event.key==='ArrowRight'&&route.step<lesson.steps.length){event.preventDefault();go(lesson.id,route.step+1)}
+    if(event.key==='ArrowLeft'&&route.step>1){event.preventDefault();go(lesson.id,route.step-1)}
+    if(event.key.toLowerCase()==='r'){setReplayKey(value=>value+1);setPlaying(true)}
+    if(event.code==='Space'){event.preventDefault();setPlaying(value=>!value)}
+  };window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)},[go,route,searchOpen,lesson])
+  const searchResults=curriculumModules.flatMap(module=>module.topics.map(topic=>({...topic,module:module.title,lesson:lessons.find(item=>item.topicId===topic.id)})))
+    .filter(topic=>`${topic.name} ${topic.module}`.toLowerCase().includes(query.toLowerCase())).slice(0,12)
+  const totalTopics=curriculumModules.reduce((count,module)=>count+module.topics.length,0)
+  function markCompleted(){setCompleted(previous=>previous.includes(lesson.id)?previous:[...previous,lesson.id])}
+  return <div className="app-shell">
+    <header className="topbar"><a href="#/" className="brand"><span className="brand-icon">◇</span><span>SYSTEM DESIGN <em>ACADEMY</em></span></a>
+      <div className="top-links"><a href="#/">Curriculum</a><span title="Future release">Practice · soon</span><span title="Future release">Design Lab · soon</span></div>
+      <div className="actions"><button className="search-trigger" aria-label="Search lessons" onClick={()=>setSearchOpen(true)}>⌕ <span>Search</span><kbd>Ctrl K</kbd></button>
+      <button aria-label="Toggle theme" onClick={()=>setTheme(old=>old==='light'?'dark':'light')}>{theme==='light'?'☾':'☀'}</button></div>
+    </header>
+    <div className="layout"><aside className="sidebar"><div className="sidebar-head">THE CURRICULUM <span>{curriculumModules.length} MODULES · {totalTopics} TOPICS</span></div>
+      <div className="module-list">{curriculumModules.map((module,index)=><details key={module.id} open={module.id===lesson.moduleId}>
+        <summary><span className="module-number">{String(index+1).padStart(2,'0')}</span>{module.title}<span className="count">{module.topics.length}</span></summary>
+        <div className="topic-list">{module.topics.map(topic=>{
+          const item=lessons.find(entry=>entry.topicId===topic.id)
+          return <button key={topic.id} disabled={!item} className={route.view==='lesson'&&item?.id===lesson.id?'active':''}
+            title={item?undefined:'Content planned — not yet implemented'} onClick={()=>item&&go(item.id)}>
+            {topic.name}{!item&&<small>Planned</small>}{item&&completed.includes(item.id)&&<span aria-label="Completed">✓</span>}
+          </button>
+        })}</div>
+      </details>)}</div><div className="sidebar-bottom">{completed.length} of {lessons.length} available lessons completed<small>Progress is saved in this browser.</small></div>
+    </aside>
+    <main className="main-area">{route.view==='not-found'?<div className="welcome"><span className="eyebrow">ROUTE NOT FOUND</span><h1>That lesson step doesn't exist.</h1><p>Select a lesson from the curriculum.</p><a className="primary-link" href="#/">Back to curriculum</a></div>
+    :route.view==='home'?<div className="welcome"><span className="eyebrow">INTERACTIVE SYSTEM DESIGN LEARNING LAB</span><h1>See how systems<br/><i>actually work.</i></h1><p>Learn infrastructure design through animated stories, architecture diagrams, failure scenarios and engineering trade-offs.</p>
+      <div className="overview-stats"><div><strong>{String(curriculumModules.length).padStart(2,'0')}</strong><span>Modules mapped</span></div><div><strong>{totalTopics}</strong><span>Topics planned</span></div><div><strong>{String(lessons.length).padStart(2,'0')}</strong><span>Lessons available</span></div></div>
+      <div className="lesson-catalog">{lessons.map(item=><button className="lesson-card" key={item.id} onClick={()=>go(item.id)}><strong>{item.title}</strong><span>{item.steps.length} interactive steps · {completed.includes(item.id)?'Completed':'Open lesson'}</span><small>{item.subtitle}</small></button>)}</div><p className="disclaimer">Early access · Additional topics will be released incrementally.</p>
+    </div>:<>
+      <div className="lesson-head"><div><span className="eyebrow">{lesson.moduleId.toUpperCase()} / INTERACTIVE LESSON</span><h1>{lesson.title}</h1><p>{lesson.subtitle}</p></div><span className="step-pill">STEP {String(route.step).padStart(2,'0')} / {lesson.steps.length}</span></div>
+      <div className="player-grid"><div className="canvas-panel"><div className="panel-top"><span>◈ ARCHITECTURE VISUALIZER</span><span className="live-dot">● {playing?'PLAYING':'PAUSED'}</span></div>
+        <Scene step={step} playing={playing} replayKey={replayKey}/><div className="controls"><button disabled={route.step===1} onClick={()=>go(lesson.id,route.step-1)}>← Previous</button>
+        <button aria-label="Replay animation" onClick={()=>{setReplayKey(value=>value+1);setPlaying(true)}}>↺ Replay</button>
+        <button aria-label={playing?'Pause animation':'Play animation'} onClick={()=>setPlaying(value=>!value)}>{playing?'Ⅱ Pause':'▶ Play'}</button>
+        <button className="next" disabled={route.step===lesson.steps.length} onClick={()=>go(lesson.id,route.step+1)}>Next step →</button></div></div>
+        <article className="explanation"><span className={`category ${step.category}`}>{step.category.toUpperCase()}</span><h2>{step.title}</h2><p>{step.body}</p>
+          {step.metric&&<div className="metric">{step.metric}<small>Example / assumption — not live metrics</small></div>}
+          <div className="takeaway"><span>KEY TAKEAWAY</span><strong>{step.takeaway}</strong></div>
+          {route.step===lesson.steps.length&&<button className="primary complete" onClick={markCompleted}>{completed.includes(lesson.id)?'✓ Lesson completed':'Mark lesson complete ✓'}</button>}
+          <div className="shortcuts">← → Navigate · Space Pause · R Replay</div></article></div>
+      <div className="lesson-progress" aria-label={`${route.step} of ${lesson.steps.length} steps`}><div style={{width:`${route.step/lesson.steps.length*100}%`}}/></div>
+    </>}</main></div>
+    {searchOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setSearchOpen(false)}}>
+      <div className="search-dialog" role="dialog" aria-modal="true" aria-label="Search curriculum"><div className="search-input"><span>⌕</span><input autoFocus placeholder="Search topics and modules…" value={query} onChange={event=>setQuery(event.target.value)}
+        onKeyDown={event=>{if(event.key==='Escape')setSearchOpen(false);if(event.key==='Enter'&&searchResults[0]?.lesson){go(searchResults[0].lesson.id);setSearchOpen(false)}}}/><button onClick={()=>setSearchOpen(false)}>Esc ✕</button></div>
+        <div className="search-results">{searchResults.length?searchResults.map(result=><button key={`${result.module}-${result.id}`} disabled={!result.lesson} onClick={()=>{if(result.lesson){go(result.lesson.id);setSearchOpen(false)}}}>
+          <strong>{result.name}</strong><span>{result.module} · {result.lesson?'Open lesson':'Planned'}</span></button>):<p>No matching topics</p>}</div></div>
+    </div>}
+  </div>
 }
 export default App
