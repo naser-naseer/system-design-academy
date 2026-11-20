@@ -1,0 +1,26 @@
+.scene-camera-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 2px 9px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.scene-camera-toolbar button {
+  min-width: 36px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 7px;
+  color: var(--ink);
+  font-weight: 700;
+}
+.scene-camera-toolbar button:hover { background: var(--soft); }
+.scene-camera-toolbar button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.scene-camera-toolbar output { min-width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
+.scene-camera-toolbar .camera-help { margin-right: auto; }
+.scene-stage { cursor: grab; touch-action: none; user-select: none; }
+.scene-stage:active { cursor: grabbing; }
+@media (max-width: 480px) { .scene-camera-toolbar .camera-help { display: none; } }
