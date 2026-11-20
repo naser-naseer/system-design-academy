@@ -1,0 +1,7 @@
+.timeline-highlight rect { stroke: #bc783d; stroke-width: 3; }
+.timeline-highlight text { font-weight: 800; }
+@media (prefers-reduced-motion: reduce) { .timeline-highlight { transition: none; } }
+.scene-timeline-controls {display:flex;align-items:center;gap:10px;padding:0 10px 9px;color:var(--muted);font-size:11px}
+.scene-timeline-controls input {flex:1;min-width:60px;accent-color:var(--accent);cursor:pointer}
+.scene-timeline-controls output {min-width:76px;text-align:right;font-variant-numeric:tabular-nums}
+.scene-timeline-controls input:focus-visible {outline:3px solid var(--accent);outline-offset:3px}

@@ -11,17 +11,21 @@ import { STAGE, boundsForNodes, fitCamera, zoomAt, panBy } from './camera'
 import type { Camera } from './camera'
 import './camera.css'
 import './transitions.css'
+import {evaluateTimeline, advanceClock, validateTimeline} from './timeline'
+import type {TimelineFrame, PacketKind} from './timeline'
+import {hldLldTimelines} from './lesson-timelines'
+import './timeline.css'
 
 const palette: Record<SceneNode['kind'], string> = {
   client: '#8fbcc7', gateway: '#c7ad76', service: '#91b7a1', cache: '#ad9bd1',
   database: '#d7a58d', component: '#93b8b8', monitor: '#a9b6c7',
 }
 
-function ArchitectureNode({node}: {node: SceneNode}) {
+function ArchitectureNode({node, visual}: {node: SceneNode; visual: TimelineFrame['nodes'][string]}) {
   const x = -NODE_WIDTH / 2
   const y = -NODE_HEIGHT / 2
-  const color = palette[node.kind]
-  return <g transform={`translate(${node.x},${node.y})`}>
+  const color = visual.status === 'failed' ? '#e09a8f' : visual.status === 'busy' ? '#e6be80' : visual.status === 'healthy' ? '#a4cdb1' : palette[node.kind]
+  return <g transform={`translate(${node.x},${node.y})`} opacity={visual.opacity} className={visual.highlighted?'timeline-highlight':''}>
     <rect x={x + 5} y={y + 9} rx="10" width={NODE_WIDTH + NODE_SIDE} height={NODE_HEIGHT + 8} fill="#152b32" opacity=".12" />
     <path d={`M${x} ${y} l${NODE_SIDE} ${-NODE_TOP} h${NODE_WIDTH} l${-NODE_SIDE} ${NODE_TOP} Z`} fill={color} stroke="#42575e" strokeOpacity=".45" />
     <path d={`M${x + NODE_WIDTH} ${y} l${NODE_SIDE} ${-NODE_TOP} v${NODE_HEIGHT} l${-NODE_SIDE} ${NODE_TOP} Z`} fill="#657c80" stroke="#42575e" strokeOpacity=".4" />
@@ -29,6 +33,7 @@ function ArchitectureNode({node}: {node: SceneNode}) {
     <path d={`M${x + 12} ${y + 13} h${NODE_WIDTH - 24}`} stroke="#fff" strokeOpacity=".48" strokeWidth="2" />
     <circle cx={x + 12} cy={y + NODE_HEIGHT - 12} r="3" fill="#336758" opacity=".85" />
     <text textAnchor="middle" y="6" fontSize="14" fill="#20333a" fontWeight="700">{node.label}</text>
+    {visual.status === 'failed' && <text x={NODE_WIDTH/2-4} y={-NODE_HEIGHT/2+15} fill="#862c2c" fontSize="17" textAnchor="end" fontWeight="800">!</text>}
   </g>
 }
 
@@ -43,34 +48,50 @@ function routeEdges(step: LessonStep): RoutedEdge[] {
   })
 }
 
-function SceneContent({step, edges, elapsed, reducedMotion, showPacket}: {
-  step: LessonStep; edges: RoutedEdge[]; elapsed: number; reducedMotion: boolean; showPacket: boolean
+const packetColors: Record<PacketKind, string> = {
+  request: '#bc783d', response: '#388a7e', retry: '#9876ca', error: '#c94545',
+}
+function SceneContent({step, edges, frame}: {
+  step: LessonStep; edges: RoutedEdge[]; frame: TimelineFrame
 }) {
-  const active=edges.find(edge=>edge.active)
-  const packet=active && showPacket ? pointOnRoute(active.route,reducedMotion?1:elapsed/2400) : null
   const nodesByDepth=[...step.nodes].sort((a,b)=>a.y-b.y || a.x-b.x)
+  const routeByIndex=new Map(step.edges.map((edge,index)=>[index, edges.find(e=>e.id===`${edge.from}-${edge.to}-${index}`)]))
   return <>
-    {edges.map(edge=><path key={edge.id} d={routeToPath(edge.route)}
-      fill="none" stroke={edge.active?'#c78543':'#8da5a8'}
-      strokeWidth={edge.active?3.5:2}
-      strokeLinejoin="round" strokeLinecap="round"
-      strokeDasharray={edge.active?'7 5':undefined} />)}
-    {nodesByDepth.map(n=><ArchitectureNode key={n.id} node={n}/>)}
-    {packet && <g transform={`translate(${packet.x},${packet.y})`}>
-      <circle r={PACKET_RADIUS} fill="white" stroke="#bc783d" strokeWidth={PACKET_STROKE}/>
-      <circle r="2.7" fill="#bc783d"/>
-    </g>}
+    {edges.map(edge=>{
+      const index=step.edges.findIndex((e,i)=>edge.id===`${e.from}-${e.to}-${i}`)
+      if(index<0 || !frame.edges[index])return null
+      const source=step.nodes.find(n=>n.id===step.edges[index].from)
+      const target=step.nodes.find(n=>n.id===step.edges[index].to)
+      const opacity=Math.min(source?frame.nodes[source.id].opacity:1,target?frame.nodes[target.id].opacity:1)
+      return <path key={edge.id} d={routeToPath(edge.route)} opacity={opacity}
+        fill="none" stroke={edge.active?'#c78543':'#8da5a8'}
+        strokeWidth={edge.active?3.5:2} strokeLinejoin="round" strokeLinecap="round"
+        strokeDasharray={edge.active?'7 5':undefined}/>
+    })}
+    {nodesByDepth.map(n=><ArchitectureNode key={n.id} node={n} visual={frame.nodes[n.id]}/>)}
+    {frame.packets.map(packet=>{
+      const edge=routeByIndex.get(packet.edgeIndex)
+      if(!edge)return null
+      const location=pointOnRoute(edge.route,packet.progress)
+      const color=packetColors[packet.kind]
+      return <g key={packet.id} transform={`translate(${location.x},${location.y})`}>
+        <circle r={PACKET_RADIUS} fill="white" stroke={color} strokeWidth={PACKET_STROKE}/>
+        <circle r="2.7" fill={color}/>
+      </g>
+    })}
   </>
 }
 
-/** Phase 4: obstacle-aware routing, arc-length packet animation and cancelable scene crossfades. */
+/** Phase 5: declarative timeline layered on Phase 4 routed scenes and Phase 3 camera. */
 export function Scene({step, playing, replayKey}: {step: LessonStep; playing: boolean; replayKey: number}) {
+  const reducedMotion=typeof window!=='undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const [elapsed, setElapsed]=useState(0)
+  const timelineStep=useMemo(()=>({...step,timeline:hldLldTimelines[step.id]}),[step])
+  const frame=useMemo(()=>evaluateTimeline(timelineStep,elapsed,reducedMotion),[timelineStep,elapsed,reducedMotion])
   const bounds=useMemo(()=>boundsForNodes(step.nodes),[step])
   const [camera,setCamera]=useState<Camera>(()=>fitCamera(step.nodes))
   const svgRef=useRef<SVGSVGElement>(null)
   const drag=useRef<{start:{x:number;y:number}; initial:Camera; pointerId:number}|null>(null)
-  const reducedMotion=typeof window!=='undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const currentEdges=useMemo(()=>routeEdges(step),[step])
 
   const lastStep=useRef(step)
@@ -84,6 +105,7 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
     return ()=>window.clearTimeout(timeout)
   },[step,reducedMotion])
   const outgoingEdges=useMemo(()=>outgoing?routeEdges(outgoing):[],[outgoing])
+  const outgoingFrame=useMemo(()=>outgoing?evaluateTimeline({...outgoing,timeline:hldLldTimelines[outgoing.id]},0,true):null,[outgoing])
 
   useEffect(()=>{setCamera(fitCamera(step.nodes));drag.current=null},[step])
   function svgPoint(clientX:number,clientY:number){
@@ -126,7 +148,8 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
       const c=clock.current
       const delta=c.last?Math.min(50,now-c.last):0
       c.last=now
-      c.elapsed=(c.elapsed+delta)%2400
+      if(document.visibilityState==='hidden'){c.last=now;frame=requestAnimationFrame(tick);return}
+      c.elapsed=advanceClock(c.elapsed,delta)
       setElapsed(c.elapsed)
       frame=requestAnimationFrame(tick)
     }
@@ -135,6 +158,7 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
   },[playing,reducedMotion,replayKey,step.id])
 
   const active=currentEdges.some(edge=>edge.active)
+  const timelineWarnings=useMemo(()=>validateTimeline(timelineStep),[timelineStep])
   return <div className="scene-wrap">
     <div className="scene-camera-toolbar" role="group" aria-label="Diagram camera controls">
       <span className="camera-help">Drag to pan · Routed connections</span>
@@ -142,6 +166,18 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
       <output aria-label="Diagram zoom" className="camera-zoom">{Math.round(camera.scale*100)}%</output>
       <button type="button" onClick={()=>changeZoom(1.25)} aria-label="Zoom in" title="Zoom in">+</button>
       <button type="button" onClick={()=>setCamera(fitCamera(step.nodes))} aria-label="Fit diagram" title="Fit all nodes">Fit</button>
+    </div>
+    <div className="scene-timeline-controls" role="group" aria-label="Animation timeline">
+      <label htmlFor="scene-timeline-scrub">Timeline</label>
+      <input id="scene-timeline-scrub" type="range" min="0" max={timelineStep.timeline?.durationMs ?? 3000} step="50"
+        value={Math.min(frame.timeMs,timelineStep.timeline?.durationMs ?? 3000)} disabled={reducedMotion}
+        onChange={event=>{
+          const next=Number(event.currentTarget.value)
+          clock.current.elapsed=next
+          clock.current.last=0
+          setElapsed(next)
+        }}/>
+      <output aria-label="Timeline position">{(frame.timeMs/1000).toFixed(1)}s / {((timelineStep.timeline?.durationMs ?? 3000)/1000).toFixed(1)}s</output>
     </div>
     <svg ref={svgRef} viewBox="0 0 850 310" role="img" className="scene-stage"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
@@ -155,13 +191,13 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
       <rect width="850" height="310" rx="16" fill="url(#scene-grid)"/>
       <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
         {outgoing&&!reducedMotion&&<g className="scene-outgoing" aria-hidden="true">
-          <SceneContent step={outgoing} edges={outgoingEdges} elapsed={0} reducedMotion={true} showPacket={false}/>
+          <SceneContent step={outgoing} edges={outgoingEdges} frame={{...outgoingFrame!,packets:[]}}/>
         </g>}
         <g className={outgoing&&!reducedMotion?'scene-incoming':''} key={step.id}>
-          <SceneContent step={step} edges={currentEdges} elapsed={elapsed} reducedMotion={reducedMotion} showPacket={true}/>
+          <SceneContent step={step} edges={currentEdges} frame={frame}/>
         </g>
       </g>
     </svg>
-    <div className="diagram-caption">{active?'● Animated request path':'Architecture scene'} · Obstacle-aware routing · 2.5D illustration</div>
+    <div className="diagram-caption">{active?'● Animated request path':'Architecture scene'} · Declarative timeline · Obstacle-aware routing · 2.5D illustration{timelineWarnings.length>0 && <span role="alert"> · Timeline validation error</span>}</div>
   </div>
 }
