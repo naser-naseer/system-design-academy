@@ -1,0 +1,8 @@
+/* Crossfade visual scene layers without delaying semantic lesson state updates. */
+.scene-incoming { animation: sda-scene-enter 250ms ease-out both; }
+.scene-outgoing { animation: sda-scene-exit 250ms ease-in both; pointer-events: none; }
+@keyframes sda-scene-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sda-scene-exit { from { opacity: 0.65; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .scene-incoming, .scene-outgoing { animation: none; }
+}
