@@ -86,7 +86,7 @@ function SceneContent({step, edges, frame}: {
 export function Scene({step, playing, replayKey}: {step: LessonStep; playing: boolean; replayKey: number}) {
   const reducedMotion=typeof window!=='undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const [elapsed, setElapsed]=useState(0)
-  const timelineStep=useMemo(()=>({...step,timeline:hldLldTimelines[step.id]}),[step])
+  const timelineStep=useMemo(()=>({...step,timeline:step.timeline ?? hldLldTimelines[step.id]}),[step])
   const frame=useMemo(()=>evaluateTimeline(timelineStep,elapsed,reducedMotion),[timelineStep,elapsed,reducedMotion])
   const bounds=useMemo(()=>boundsForNodes(step.nodes),[step])
   const [camera,setCamera]=useState<Camera>(()=>fitCamera(step.nodes))
@@ -105,7 +105,7 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
     return ()=>window.clearTimeout(timeout)
   },[step,reducedMotion])
   const outgoingEdges=useMemo(()=>outgoing?routeEdges(outgoing):[],[outgoing])
-  const outgoingFrame=useMemo(()=>outgoing?evaluateTimeline({...outgoing,timeline:hldLldTimelines[outgoing.id]},0,true):null,[outgoing])
+  const outgoingFrame=useMemo(()=>outgoing?evaluateTimeline({...outgoing,timeline:outgoing.timeline ?? hldLldTimelines[outgoing.id]},0,true):null,[outgoing])
 
   useEffect(()=>{setCamera(fitCamera(step.nodes));drag.current=null},[step])
   function svgPoint(clientX:number,clientY:number){
@@ -166,18 +166,6 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
       <output aria-label="Diagram zoom" className="camera-zoom">{Math.round(camera.scale*100)}%</output>
       <button type="button" onClick={()=>changeZoom(1.25)} aria-label="Zoom in" title="Zoom in">+</button>
       <button type="button" onClick={()=>setCamera(fitCamera(step.nodes))} aria-label="Fit diagram" title="Fit all nodes">Fit</button>
-    </div>
-    <div className="scene-timeline-controls" role="group" aria-label="Animation timeline">
-      <label htmlFor="scene-timeline-scrub">Timeline</label>
-      <input id="scene-timeline-scrub" type="range" min="0" max={timelineStep.timeline?.durationMs ?? 3000} step="50"
-        value={Math.min(frame.timeMs,timelineStep.timeline?.durationMs ?? 3000)} disabled={reducedMotion}
-        onChange={event=>{
-          const next=Number(event.currentTarget.value)
-          clock.current.elapsed=next
-          clock.current.last=0
-          setElapsed(next)
-        }}/>
-      <output aria-label="Timeline position">{(frame.timeMs/1000).toFixed(1)}s / {((timelineStep.timeline?.durationMs ?? 3000)/1000).toFixed(1)}s</output>
     </div>
     <svg ref={svgRef} viewBox="0 0 850 310" role="img" className="scene-stage"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
