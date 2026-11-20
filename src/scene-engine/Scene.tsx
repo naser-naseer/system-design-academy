@@ -1,84 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonStep, SceneNode } from '../curriculum/lessons'
+import {
+  connectingSegment, interpolate, NODE_WIDTH, NODE_HEIGHT, NODE_TOP, NODE_SIDE,
+  PACKET_RADIUS, PACKET_STROKE, PACKET_CLEARANCE,
+} from './geometry'
 
 const palette: Record<SceneNode['kind'], string> = {
-  client: '#8fbcc7',
-  gateway: '#c7ad76',
-  service: '#91b7a1',
-  cache: '#ad9bd1',
-  database: '#d7a58d',
-  component: '#93b8b8',
-  monitor: '#a9b6c7',
+  client: '#8fbcc7', gateway: '#c7ad76', service: '#91b7a1', cache: '#ad9bd1',
+  database: '#d7a58d', component: '#93b8b8', monitor: '#a9b6c7',
 }
 
-const nodeWidth = 126
-const nodeHeight = 66
-const packetRadius = 9
-const packetStrokeWidth = 3
-// A 2px visual gap between the packet's outside edge and node boundary.
-const packetClearance = packetRadius + packetStrokeWidth / 2 + 2
-
-interface Point { x: number; y: number }
-interface Segment { start: Point; end: Point }
-
-/**
- * Intersects a center-to-center ray with a rectangle of the given half-size.
- * Rectangles are axis aligned in SVG scene coordinates.
- */
-function rectBoundaryDistance(dx: number, dy: number, halfWidth: number, halfHeight: number): number {
-  const distance = Math.hypot(dx, dy)
-  if (distance === 0) return 0
-  const ux = Math.abs(dx / distance)
-  const uy = Math.abs(dy / distance)
-  return Math.min(
-    ux === 0 ? Number.POSITIVE_INFINITY : halfWidth / ux,
-    uy === 0 ? Number.POSITIVE_INFINITY : halfHeight / uy,
-  )
+function ArchitectureNode({node}: {node: SceneNode}) {
+  const x = -NODE_WIDTH / 2
+  const y = -NODE_HEIGHT / 2
+  const color = palette[node.kind]
+  return <g transform={`translate(${node.x},${node.y})`}>
+    <rect x={x + 5} y={y + 9} rx="10" width={NODE_WIDTH + NODE_SIDE} height={NODE_HEIGHT + 8} fill="#152b32" opacity=".12" />
+    <path d={`M${x} ${y} l${NODE_SIDE} ${-NODE_TOP} h${NODE_WIDTH} l${-NODE_SIDE} ${NODE_TOP} Z`} fill={color} stroke="#42575e" strokeOpacity=".45" />
+    <path d={`M${x + NODE_WIDTH} ${y} l${NODE_SIDE} ${-NODE_TOP} v${NODE_HEIGHT} l${-NODE_SIDE} ${NODE_TOP} Z`} fill="#657c80" stroke="#42575e" strokeOpacity=".4" />
+    <rect x={x} y={y} width={NODE_WIDTH} height={NODE_HEIGHT} rx="6" fill={color} stroke="#475e63" strokeOpacity=".55" strokeWidth="1.5" />
+    <path d={`M${x + 12} ${y + 13} h${NODE_WIDTH - 24}`} stroke="#fff" strokeOpacity=".48" strokeWidth="2" />
+    <circle cx={x + 12} cy={y + NODE_HEIGHT - 12} r="3" fill="#336758" opacity=".85" />
+    <text textAnchor="middle" y="6" fontSize="14" fill="#20333a" fontWeight="700">{node.label}</text>
+  </g>
 }
 
-/**
- * Connects visible node boundaries rather than node centers. Packet endpoints
- * have an additional clearance so the entire circle remains outside the boxes.
- * A short/overlapping edge returns null instead of drawing through a node.
- */
-function connectingSegment(a: SceneNode, b: SceneNode, clearance: number): Segment | null {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const distance = Math.hypot(dx, dy)
-  if (distance === 0) return null
-
-  const startOffset = rectBoundaryDistance(dx, dy, nodeWidth / 2, nodeHeight / 2) + clearance
-  const endOffset = rectBoundaryDistance(dx, dy, nodeWidth / 2, nodeHeight / 2) + clearance
-  if (startOffset + endOffset >= distance) return null
-
-  const ux = dx / distance
-  const uy = dy / distance
-  return {
-    start: { x: a.x + ux * startOffset, y: a.y + uy * startOffset },
-    end: { x: b.x - ux * endOffset, y: b.y - uy * endOffset },
-  }
-}
-
-function lerp(a: Point, b: Point, progress: number): Point {
-  return {
-    x: a.x + (b.x - a.x) * progress,
-    y: a.y + (b.y - a.y) * progress,
-  }
-}
-
-export function Scene({ step, playing, replayKey }: { step: LessonStep; playing: boolean; replayKey: number }) {
+/** Stage 2: extruded pseudo-isometric SVG cards with depth sorting and boundary-clipped packet paths. */
+export function Scene({step, playing, replayKey}: {step: LessonStep; playing: boolean; replayKey: number}) {
   const [elapsed, setElapsed] = useState(0)
-  const clock = useRef({ last: 0, elapsed: 0 })
-
+  const clock = useRef({elapsed: 0, last: 0})
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  useEffect(() => {clock.current = {elapsed: 0, last: 0}; setElapsed(0)}, [step.id, replayKey])
   useEffect(() => {
-    clock.current = { last: 0, elapsed: 0 }
-    setElapsed(0)
-  }, [step.id, replayKey])
-
-  useEffect(() => {
-    if (!playing) return
+    if (!playing || reducedMotion) return
     let frame = 0
-    function tick(now: number) {
+    const tick = (now: number) => {
       const c = clock.current
       const delta = c.last ? Math.min(50, now - c.last) : 0
       c.last = now
@@ -87,93 +43,42 @@ export function Scene({ step, playing, replayKey }: { step: LessonStep; playing:
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
-    return () => {
-      cancelAnimationFrame(frame)
-      clock.current.last = 0
-    }
-  }, [playing, step.id, replayKey])
+    return () => {cancelAnimationFrame(frame); clock.current.last = 0}
+  }, [playing, reducedMotion, replayKey, step.id])
 
   const active = step.activeEdge === undefined ? undefined : step.edges[step.activeEdge]
-  const from = active && step.nodes.find(node => node.id === active.from)
-  const to = active && step.nodes.find(node => node.id === active.to)
-  const packetSegment = from && to ? connectingSegment(from, to, packetClearance) : null
-  const progress = (elapsed % 2400) / 2400
-  const pos = packetSegment ? lerp(packetSegment.start, packetSegment.end, progress) : null
+  const from = active && step.nodes.find(n => n.id === active.from)
+  const to = active && step.nodes.find(n => n.id === active.to)
+  const packetPath = from && to ? connectingSegment(from, to, PACKET_CLEARANCE) : null
+  const packet = packetPath ? interpolate(packetPath, reducedMotion ? 1 : elapsed / 2400) : null
+  const nodesByDepth = [...step.nodes].sort((a,b) => a.y - b.y || a.x - b.x)
 
-  return (
-    <div className="scene-wrap">
-      <svg
-        viewBox="0 0 850 310"
-        role="img"
-        aria-label={`Architecture diagram for ${step.title}: ${step.nodes.map(node => node.label).join(', ')}`}
-      >
-        <defs>
-          <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-            <path d="M24 0H0V24" fill="none" stroke="currentColor" strokeOpacity=".075" />
-          </pattern>
-        </defs>
-        <rect x="0" y="0" width="850" height="310" fill="url(#grid)" rx="16" />
-
-        {step.edges.map((edge, index) => {
-          const a = step.nodes.find(node => node.id === edge.from)
-          const b = step.nodes.find(node => node.id === edge.to)
-          if (!a || !b) return null
-          const segment = connectingSegment(a, b, 0)
-          if (!segment) return null
-          return (
-            <line
-              key={`${edge.from}-${edge.to}-${index}`}
-              x1={segment.start.x}
-              y1={segment.start.y}
-              x2={segment.end.x}
-              y2={segment.end.y}
-              stroke={index === step.activeEdge ? '#cc8a45' : '#91a5a8'}
-              strokeWidth={index === step.activeEdge ? 3.5 : 2}
-              strokeDasharray={index === step.activeEdge ? '7 5' : undefined}
-            />
-          )
-        })}
-
-        {step.nodes.map(node => (
-          <g key={node.id} transform={`translate(${node.x},${node.y})`}>
-            <rect
-              x={-nodeWidth / 2 + 4}
-              y={-nodeHeight / 2 + 8}
-              width={nodeWidth}
-              height={nodeHeight}
-              rx="14"
-              fill="#394146"
-              opacity=".14"
-            />
-            <rect
-              x={-nodeWidth / 2}
-              y={-nodeHeight / 2}
-              width={nodeWidth}
-              height={nodeHeight}
-              rx="14"
-              fill={palette[node.kind]}
-              stroke="#52636a"
-              strokeOpacity=".4"
-              strokeWidth="1.5"
-            />
-            <path d="M-50 -21H45" stroke="#fff" strokeOpacity=".42" strokeWidth="2" />
-            <text x="0" y="6" textAnchor="middle" fontSize="15" fill="#1f2e34" fontWeight="700">
-              {node.label}
-            </text>
-          </g>
-        ))}
-
-        {pos && (
-          <g transform={`translate(${pos.x},${pos.y})`}>
-            <circle r={packetRadius} fill="#fff" stroke="#bf7637" strokeWidth={packetStrokeWidth} />
-            <circle r="3" fill="#bf7637" />
-          </g>
-        )}
-      </svg>
-      <div className="diagram-caption">
-        {step.activeEdge !== undefined ? '● Animated request path' : 'Architecture scene'}
-        {' · Educational illustration, not live infrastructure'}
-      </div>
-    </div>
-  )
+  return <div className="scene-wrap">
+    <svg viewBox="0 0 850 310" role="img"
+      aria-label={`Architecture for ${step.title}: ${step.nodes.map(n => n.label).join(', ')}. ${step.edges.length} component connections.`}>
+      <defs>
+        <pattern id="scene-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+          <path d="M24 0H0V24" stroke="currentColor" strokeOpacity=".075" fill="none" />
+        </pattern>
+      </defs>
+      <rect width="850" height="310" rx="16" fill="url(#scene-grid)" />
+      {step.edges.map((edge,index) => {
+        const a = step.nodes.find(n => n.id === edge.from)
+        const b = step.nodes.find(n => n.id === edge.to)
+        const segment = a && b ? connectingSegment(a,b) : null
+        if (!segment) return null
+        return <line key={`${edge.from}-${edge.to}-${index}`}
+          x1={segment.start.x} y1={segment.start.y} x2={segment.end.x} y2={segment.end.y}
+          stroke={index === step.activeEdge ? '#c78543' : '#8da5a8'}
+          strokeWidth={index === step.activeEdge ? 3.5 : 2}
+          strokeDasharray={index === step.activeEdge ? '7 5' : undefined} />
+      })}
+      {nodesByDepth.map(n => <ArchitectureNode key={n.id} node={n} />)}
+      {packet && <g transform={`translate(${packet.x},${packet.y})`}>
+        <circle r={PACKET_RADIUS} fill="white" stroke="#bc783d" strokeWidth={PACKET_STROKE} />
+        <circle r="2.7" fill="#bc783d" />
+      </g>}
+    </svg>
+    <div className="diagram-caption">{active ? '● Animated request path' : 'Architecture scene'} · 2.5D visual explanation · Illustrative, not live infrastructure</div>
+  </div>
 }
