@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { LessonStep, SceneNode } from '../curriculum/lessons'
 import {
   connectingSegment, interpolate, NODE_WIDTH, NODE_HEIGHT, NODE_TOP, NODE_SIDE,
   PACKET_RADIUS, PACKET_STROKE, PACKET_CLEARANCE,
 } from './geometry'
+import { STAGE, boundsForNodes, fitCamera, zoomAt, panBy } from './camera'
+import type { Camera } from './camera'
+import './camera.css'
 
 const palette: Record<SceneNode['kind'], string> = {
   client: '#8fbcc7', gateway: '#c7ad76', service: '#91b7a1', cache: '#ad9bd1',
@@ -25,9 +29,48 @@ function ArchitectureNode({node}: {node: SceneNode}) {
   </g>
 }
 
-/** Stage 2: extruded pseudo-isometric SVG cards with depth sorting and boundary-clipped packet paths. */
+/** Stage 3: 2.5D SVG rendering with bounded viewport camera, pointer pan and fit/zoom controls. */
 export function Scene({step, playing, replayKey}: {step: LessonStep; playing: boolean; replayKey: number}) {
   const [elapsed, setElapsed] = useState(0)
+  const bounds = useMemo(() => boundsForNodes(step.nodes), [step])
+  const [camera, setCamera] = useState<Camera>(() => fitCamera(step.nodes))
+  const svgRef = useRef<SVGSVGElement>(null)
+  const drag = useRef<{start: {x:number;y:number}; initial: Camera; pointerId: number} | null>(null)
+  useEffect(() => { setCamera(fitCamera(step.nodes)); drag.current = null }, [step])
+
+  function svgPoint(clientX: number, clientY: number) {
+    const svg = svgRef.current
+    if (!svg) return null
+    const matrix = svg.getScreenCTM()
+    if (!matrix) return null
+    const point = svg.createSVGPoint()
+    point.x = clientX
+    point.y = clientY
+    const result = point.matrixTransform(matrix.inverse())
+    return {x:result.x,y:result.y}
+  }
+  function onPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (event.button !== 0) return
+    const start = svgPoint(event.clientX,event.clientY)
+    if (!start) return
+    drag.current = {start, initial:camera, pointerId:event.pointerId}
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  function onPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return
+    const current = svgPoint(event.clientX,event.clientY)
+    if (!current) return
+    const d = drag.current
+    setCamera(panBy(d.initial,{x:current.x-d.start.x,y:current.y-d.start.y},bounds))
+  }
+  function onPointerEnd(event: ReactPointerEvent<SVGSVGElement>) {
+    if (drag.current?.pointerId !== event.pointerId) return
+    drag.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+  function changeZoom(factor: number) {
+    setCamera(old => zoomAt(old,factor,{x:STAGE.width/2,y:STAGE.height/2},bounds))
+  }
   const clock = useRef({elapsed: 0, last: 0})
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   useEffect(() => {clock.current = {elapsed: 0, last: 0}; setElapsed(0)}, [step.id, replayKey])
@@ -54,7 +97,16 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
   const nodesByDepth = [...step.nodes].sort((a,b) => a.y - b.y || a.x - b.x)
 
   return <div className="scene-wrap">
-    <svg viewBox="0 0 850 310" role="img"
+    <div className="scene-camera-toolbar" role="group" aria-label="Diagram camera controls">
+      <span className="camera-help">Drag to pan</span>
+      <button type="button" onClick={() => changeZoom(1/1.25)} aria-label="Zoom out" title="Zoom out">−</button>
+      <output aria-label="Diagram zoom" className="camera-zoom">{Math.round(camera.scale*100)}%</output>
+      <button type="button" onClick={() => changeZoom(1.25)} aria-label="Zoom in" title="Zoom in">+</button>
+      <button type="button" onClick={() => setCamera(fitCamera(step.nodes))} aria-label="Fit diagram" title="Fit all nodes">Fit</button>
+    </div>
+    <svg ref={svgRef} viewBox="0 0 850 310" role="img" className="scene-stage"
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onLostPointerCapture={() => {drag.current=null}}
       aria-label={`Architecture for ${step.title}: ${step.nodes.map(n => n.label).join(', ')}. ${step.edges.length} component connections.`}>
       <defs>
         <pattern id="scene-grid" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -62,6 +114,7 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
         </pattern>
       </defs>
       <rect width="850" height="310" rx="16" fill="url(#scene-grid)" />
+      <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
       {step.edges.map((edge,index) => {
         const a = step.nodes.find(n => n.id === edge.from)
         const b = step.nodes.find(n => n.id === edge.to)
@@ -78,6 +131,7 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
         <circle r={PACKET_RADIUS} fill="white" stroke="#bc783d" strokeWidth={PACKET_STROKE} />
         <circle r="2.7" fill="#bc783d" />
       </g>}
+      </g>
     </svg>
     <div className="diagram-caption">{active ? '● Animated request path' : 'Architecture scene'} · 2.5D visual explanation · Illustrative, not live infrastructure</div>
   </div>
