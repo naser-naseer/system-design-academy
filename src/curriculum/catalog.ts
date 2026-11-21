@@ -1,10 +1,12 @@
+import { commerceHldLldSteps } from './commerce-hld-lld.ts'
 import { hldLldSteps, modules } from './lessons.ts'
 import type { LessonStep } from './lessons.ts'
 import { requestSteps, loadBalancingSteps, cachingSteps, queueSteps } from './phase6-lessons.ts'
 
 export interface Lesson { id: string; moduleId: string; topicId: string; title: string; subtitle: string; steps: LessonStep[] }
 export const lessons: Lesson[] = [
-  { id:'hld-lld', moduleId:'whole', topicId:'hld-lld', title:'High-Level Design vs. Low-Level Design', subtitle:'Translate architecture decisions into implementable components.', steps:hldLldSteps },
+  { id:'hld-lld', moduleId:'whole', topicId:'hld-lld', title:'HLD & LLD', subtitle:'One delivery platform viewed from architecture down to implementation.', steps:commerceHldLldSteps },
+  { id:'url-shortener-architecture', moduleId:'whole', topicId:'design-a-url-shortener', title:'URL Shortener Architecture', subtitle:'The original 12-step URL shortener HLD/LLD example.', steps:hldLldSteps },
   { id:'journey-of-a-request', moduleId:'foundations', topicId:'journey-of-a-request', title:'Journey of a Request', subtitle:'Trace DNS, TLS, routing, services and observability along a user request.', steps:requestSteps },
   { id:'load-balancing', moduleId:'scaling', topicId:'load-balancing', title:'Load Balancing', subtitle:'Distribute traffic, isolate failures and protect upstream capacity.', steps:loadBalancingSteps },
   { id:'caching', moduleId:'scaling', topicId:'caching', title:'Caching', subtitle:'Understand cache hits, misses, invalidation and stampede prevention.', steps:cachingSteps },
@@ -25,6 +27,8 @@ export function parseAcademyRoute(hash:string): AcademyRoute {
   if(!match)return {view:'not-found',lessonId:'hld-lld',step:1}
   const lesson=lessonById.get(match[1])
   const step=Number(match[2])
+  // Preserve bookmarks from the original 12-step HLD/LLD course for steps 9–12.
+  if(match[1]==='hld-lld' && step>=9 && step<=12) return {view:'lesson',lessonId:'url-shortener-architecture',step}
   if(!lesson || !Number.isSafeInteger(step) || step<1 || step>lesson.steps.length)
     return {view:'not-found',lessonId:'hld-lld',step:1}
   return {view:'lesson',lessonId:lesson.id,step}

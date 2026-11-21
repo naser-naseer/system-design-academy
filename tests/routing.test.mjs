@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { routeConnection, pointOnRoute, routeLength, routeIsClear, routeToPath } from '../src/scene-engine/routing.ts'
+import { routeConnection, pointOnRoute, pointOnRouteInset, routeLength, routeIsClear, routeToPath } from '../src/scene-engine/routing.ts'
 import { packetOutsideNode } from '../src/scene-engine/geometry.ts'
 
 const A={id:'a',x:100,y:150}, B={id:'b',x:700,y:150}, C={id:'c',x:400,y:150}
@@ -55,7 +55,8 @@ test('origin and destination packet never enter their blocks on a clear connecti
  const route=routeConnection(A,B,[A,B])
  assert.ok(route)
  for(let i=0;i<=100;i++){
-  const p=pointOnRoute(route,i/100)
+  const p=pointOnRouteInset(route,i/100)
+  assert.ok(p,'packet has room for radius clearance')
   assert.ok(packetOutsideNode(p,A))
   assert.ok(packetOutsideNode(p,B))
  }

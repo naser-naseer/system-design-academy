@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { LessonStep, SceneNode } from '../curriculum/lessons'
-import {
-  NODE_WIDTH, NODE_HEIGHT, NODE_TOP, NODE_SIDE,
-  PACKET_RADIUS, PACKET_STROKE,
-} from './geometry'
-import { routeConnection, pointOnRoute, routeToPath } from './routing'
+import type { LessonStep } from '../curriculum/lessons'
+import { IsometricNode } from './IsometricNode'
+import { PACKET_RADIUS } from './geometry'
+import { routeIsometricConnection, pointOnRouteInset, routeToPath } from './routing'
 import type { Route, RoutedNode } from './routing'
 import { STAGE, boundsForNodes, fitCamera, zoomAt, panBy } from './camera'
 import type { Camera } from './camera'
@@ -16,34 +14,13 @@ import type {TimelineFrame, PacketKind} from './timeline'
 import {hldLldTimelines} from './lesson-timelines'
 import './timeline.css'
 
-const palette: Record<SceneNode['kind'], string> = {
-  client: '#8fbcc7', gateway: '#c7ad76', service: '#91b7a1', cache: '#ad9bd1',
-  database: '#d7a58d', component: '#93b8b8', monitor: '#a9b6c7',
-}
-
-function ArchitectureNode({node, visual}: {node: SceneNode; visual: TimelineFrame['nodes'][string]}) {
-  const x = -NODE_WIDTH / 2
-  const y = -NODE_HEIGHT / 2
-  const color = visual.status === 'failed' ? '#e09a8f' : visual.status === 'busy' ? '#e6be80' : visual.status === 'healthy' ? '#a4cdb1' : palette[node.kind]
-  return <g transform={`translate(${node.x},${node.y})`} opacity={visual.opacity} className={visual.highlighted?'timeline-highlight':''}>
-    <rect x={x + 5} y={y + 9} rx="10" width={NODE_WIDTH + NODE_SIDE} height={NODE_HEIGHT + 8} fill="#152b32" opacity=".12" />
-    <path d={`M${x} ${y} l${NODE_SIDE} ${-NODE_TOP} h${NODE_WIDTH} l${-NODE_SIDE} ${NODE_TOP} Z`} fill={color} stroke="#42575e" strokeOpacity=".45" />
-    <path d={`M${x + NODE_WIDTH} ${y} l${NODE_SIDE} ${-NODE_TOP} v${NODE_HEIGHT} l${-NODE_SIDE} ${NODE_TOP} Z`} fill="#657c80" stroke="#42575e" strokeOpacity=".4" />
-    <rect x={x} y={y} width={NODE_WIDTH} height={NODE_HEIGHT} rx="6" fill={color} stroke="#475e63" strokeOpacity=".55" strokeWidth="1.5" />
-    <path d={`M${x + 12} ${y + 13} h${NODE_WIDTH - 24}`} stroke="#fff" strokeOpacity=".48" strokeWidth="2" />
-    <circle cx={x + 12} cy={y + NODE_HEIGHT - 12} r="3" fill="#336758" opacity=".85" />
-    <text textAnchor="middle" y="6" fontSize="14" fill="#20333a" fontWeight="700">{node.label}</text>
-    {visual.status === 'failed' && <text x={NODE_WIDTH/2-4} y={-NODE_HEIGHT/2+15} fill="#862c2c" fontSize="17" textAnchor="end" fontWeight="800">!</text>}
-  </g>
-}
-
 type RoutedEdge = { id: string; route: Route; active: boolean }
 function routeEdges(step: LessonStep): RoutedEdge[] {
   return step.edges.flatMap((edge,index) => {
     const a=step.nodes.find(n=>n.id===edge.from)
     const b=step.nodes.find(n=>n.id===edge.to)
     if(!a||!b)return []
-    const route=routeConnection(a as RoutedNode,b as RoutedNode,step.nodes as RoutedNode[])
+    const route=routeIsometricConnection(a as RoutedNode,b as RoutedNode,step.nodes as RoutedNode[])
     return route ? [{ id:`${edge.from}-${edge.to}-${index}`, route, active:index===step.activeEdge }] : []
   })
 }
@@ -62,21 +39,23 @@ function SceneContent({step, edges, frame}: {
       if(index<0 || !frame.edges[index])return null
       const source=step.nodes.find(n=>n.id===step.edges[index].from)
       const target=step.nodes.find(n=>n.id===step.edges[index].to)
-      const opacity=Math.min(source?frame.nodes[source.id].opacity:1,target?frame.nodes[target.id].opacity:1)
+      // Keep future architecture visible: same ghost alpha as unrevealed blocks.
+      const opacity=Math.max(.26,Math.min(source?frame.nodes[source.id].opacity:1,target?frame.nodes[target.id].opacity:1))
       return <path key={edge.id} d={routeToPath(edge.route)} opacity={opacity}
-        fill="none" stroke={edge.active?'#c78543':'#8da5a8'}
+        className={edge.active?'scene-edge-active':'scene-edge'} fill="none"
         strokeWidth={edge.active?3.5:2} strokeLinejoin="round" strokeLinecap="round"
-        strokeDasharray={edge.active?'7 5':undefined}/>
+        strokeDasharray={edge.active?'7 5':undefined} markerEnd="url(#v4-arrow)"/>
     })}
-    {nodesByDepth.map(n=><ArchitectureNode key={n.id} node={n} visual={frame.nodes[n.id]}/>)}
+    {nodesByDepth.map(n=><IsometricNode key={n.id} node={n} visual={frame.nodes[n.id]}/>)}
     {frame.packets.map(packet=>{
       const edge=routeByIndex.get(packet.edgeIndex)
       if(!edge)return null
-      const location=pointOnRoute(edge.route,packet.progress)
+      const location=pointOnRouteInset(edge.route,packet.progress)
+      if(!location)return null
       const color=packetColors[packet.kind]
       return <g key={packet.id} transform={`translate(${location.x},${location.y})`}>
-        <circle r={PACKET_RADIUS} fill="white" stroke={color} strokeWidth={PACKET_STROKE}/>
-        <circle r="2.7" fill={color}/>
+        <circle r={PACKET_RADIUS} fill={color} stroke="#211e1b" strokeWidth={1.4}/>
+        
       </g>
     })}
   </>
@@ -158,26 +137,40 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
   },[playing,reducedMotion,replayKey,step.id])
 
   const active=currentEdges.some(edge=>edge.active)
+  const context = step.visual
   const timelineWarnings=useMemo(()=>validateTimeline(timelineStep),[timelineStep])
   return <div className="scene-wrap">
     <div className="scene-camera-toolbar" role="group" aria-label="Diagram camera controls">
-      <span className="camera-help">Drag to pan · Routed connections</span>
+      <span className="camera-help">Drag to pan · Full architecture</span>
       <button type="button" onClick={()=>changeZoom(1/1.25)} aria-label="Zoom out" title="Zoom out">−</button>
       <output aria-label="Diagram zoom" className="camera-zoom">{Math.round(camera.scale*100)}%</output>
       <button type="button" onClick={()=>changeZoom(1.25)} aria-label="Zoom in" title="Zoom in">+</button>
       <button type="button" onClick={()=>setCamera(fitCamera(step.nodes))} aria-label="Fit diagram" title="Fit all nodes">Fit</button>
     </div>
-    <svg ref={svgRef} viewBox="0 0 850 310" role="img" className="scene-stage"
+    <div className="diagram-context" aria-label="Architecture scene context">
+      <div><small>ZOOM LEVEL</small><strong>{context?.zoomLevel ?? 'Whole system'}</strong></div>
+      <div><small>BUILDING BLOCKS</small><strong>{context?.buildingBlocks ?? `${step.nodes.length} components · ${step.edges.length} links`}</strong></div>
+      <div><small>YOU PRODUCE</small><strong>{context?.deliverable ?? 'Architecture diagram'}</strong></div>
+    </div>
+    <svg ref={svgRef} viewBox="0 0 850 620" role="img" className="scene-stage"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onLostPointerCapture={()=>{drag.current=null}}
       aria-label={`Architecture for ${step.title}: ${step.nodes.map(n=>n.label).join(', ')}. ${step.edges.length} component connections.`}>
       <defs>
-        <pattern id="scene-grid" width="24" height="24" patternUnits="userSpaceOnUse">
-          <path d="M24 0H0V24" stroke="currentColor" strokeOpacity=".075" fill="none"/>
+        <pattern id="scene-iso-grid" width="36" height="18" patternUnits="userSpaceOnUse" className="scene-floor-pattern">
+          <path d="M0 9 18 0 36 9 18 18Z M0 9 18 18 M18 0 36 9" stroke="currentColor" strokeOpacity=".13" strokeWidth=".65" fill="none"/>
         </pattern>
+        <marker id="v4-arrow" viewBox="0 0 10 10" markerWidth="5.8" markerHeight="5.8" refX="9.2" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M1 1 L9 5 L1 9 Z" fill="#46413b"/>
+        </marker>
+        <filter id="v4-ambient-shadow" x="-35%" y="-80%" width="170%" height="260%">
+          <feGaussianBlur stdDeviation="5"/>
+        </filter>
       </defs>
-      <rect width="850" height="310" rx="16" fill="url(#scene-grid)"/>
+      <rect width="850" height="620" rx="10" className="scene-stage-surface"/>
+      <rect width="850" height="620" rx="10" fill="url(#scene-iso-grid)"/>
       <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
+
         {outgoing&&!reducedMotion&&<g className="scene-outgoing" aria-hidden="true">
           <SceneContent step={outgoing} edges={outgoingEdges} frame={{...outgoingFrame!,packets:[]}}/>
         </g>}
@@ -185,7 +178,17 @@ export function Scene({step, playing, replayKey}: {step: LessonStep; playing: bo
           <SceneContent step={step} edges={currentEdges} frame={frame}/>
         </g>
       </g>
+      <g className="scene-stage-legend" aria-hidden="true" transform="translate(19 600)">
+        <circle r="4" cx="5" fill="#b8623e" stroke="#362b22" strokeWidth="1"/><text x="16" y="4">request</text>
+        <circle r="4" cx="113" fill="#4d9a75" stroke="#362b22" strokeWidth="1"/><text x="124" y="4">response</text>
+        <circle r="4" cx="229" fill="#d7a047" stroke="#362b22" strokeWidth="1"/><text x="240" y="4">event</text>
+      </g>
     </svg>
-    <div className="diagram-caption">{active?'● Animated request path':'Architecture scene'} · Declarative timeline · Obstacle-aware routing · 2.5D illustration{timelineWarnings.length>0 && <span role="alert"> · Timeline validation error</span>}</div>
+    <div className="diagram-caption">
+      <span>{active?'● Follow the animated request':'◇ Explore the system components'}</span>
+      <span>{step.nodes.length} components · {step.edges.length} connections · Illustrative model
+        {timelineWarnings.length>0&&<span role="alert"> · Timeline validation error</span>}
+      </span>
+    </div>
   </div>
 }

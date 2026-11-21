@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Browser QA generated output
+qa/node_modules/
+qa/test-results/
+qa/playwright-report/
+qa/review-captures/
+test-results/
+playwright-report/
