@@ -1,8 +1,8 @@
-import { connectingSegment, nodeBounds, PACKET_CLEARANCE } from './geometry.ts'
-import type { Point } from './geometry.ts'
+import { nodeBounds, silhouettePort, distanceToSilhouette, PACKET_CLEARANCE, PACKET_RADIUS, PACKET_STROKE } from './geometry.ts'
+import type { Point, DiagramNode } from './geometry.ts'
 
 export type Route = { points: Point[]; length: number }
-export type RoutedNode = Point & { id: string }
+export type RoutedNode = DiagramNode & { id: string }
 export type RouteEdge = { from: string; to: string }
 type Rect = ReturnType<typeof nodeBounds>
 const EPS = 1e-7
@@ -76,23 +76,34 @@ function cleanPoints(points: Point[]): Point[] {
 export function routeConnection(source: RoutedNode, target: RoutedNode, nodes: readonly RoutedNode[]): Route | null {
   if(source.id===target.id || Math.hypot(source.x-target.x,source.y-target.y)<EPS)return null
   const inflated=nodes.map(expanded)
-  const centerSegment=connectingSegment(source,target,PACKET_CLEARANCE)
-  if(centerSegment){
-    const a=centerSegment.start,b=centerSegment.end
-    // Preserve diagonal connectors when they do not intersect any unrelated card.
-    const safe=nodes.every(n => n.id===source.id || n.id===target.id || !diagonalCutsBox(a,b,expanded(n)))
-    if(safe)return {points:[a,b],length:Math.hypot(b.x-a.x,b.y-a.y)}
+  // The visible line is anchored to the actual SVG silhouette, without packet padding.
+  const visibleStart=silhouettePort(source,target)
+  const visibleEnd=silhouettePort(target,source)
+  if(!visibleStart||!visibleEnd)return null
+  const dx=target.x-source.x,dy=target.y-source.y
+  // Reject intersecting boxes where the purported connector runs backwards.
+  if((visibleEnd.x-visibleStart.x)*dx+(visibleEnd.y-visibleStart.y)*dy<=EPS)return null
+  const directSafe=nodes.every(n=>n.id===source.id||n.id===target.id||
+    !diagonalCutsBox(visibleStart,visibleEnd,expanded(n)))
+  if(directSafe) {
+    const points=[visibleStart,visibleEnd]
+    return {points,length:routeLength(points)}
   }
 
-  const dx=target.x-source.x,dy=target.y-source.y
+  // If another block obstructs the direct line, route around its inflated bounds.
+  // Short port segments are allowed *inside their own* clearance zone only.
   const horizontal=Math.abs(dx)>=Math.abs(dy)
   const s=expanded(source),t=expanded(target)
-  const start:Point=horizontal
+  const outwardStart:Point=horizontal
     ? {x:dx>=0?s.right:s.left,y:source.y}
     : {x:source.x,y:dy>=0?s.bottom:s.top}
-  const end:Point=horizontal
+  const outwardEnd:Point=horizontal
     ? {x:dx>=0?t.left:t.right,y:target.y}
     : {x:target.x,y:dy>=0?t.top:t.bottom}
+  const startPort=silhouettePort(source,outwardStart)
+  const endPort=silhouettePort(target,outwardEnd)
+  if(!startPort||!endPort)return null
+  const start=outwardStart,end=outwardEnd
   if(inflated.some((r,i)=>nodes[i].id!==source.id && nodes[i].id!==target.id && (inside(start,r)||inside(end,r))))return null
 
   const xs=[start.x,end.x,...inflated.flatMap(r=>[r.left,r.right])].map(ROUND)
@@ -147,7 +158,7 @@ export function routeConnection(source: RoutedNode, target: RoutedNode, nodes: r
     if(prior===undefined)break
     state=prior
   }
-  const points=cleanPoints(backward.reverse())
+  const points=cleanPoints([startPort,...backward.reverse(),endPort])
   return {points,length:routeLength(points)}
 }
 
@@ -165,6 +176,13 @@ function diagonalCutsBox(a: Point,b: Point,r: Rect): boolean {
   return low<1-EPS && high>EPS
 }
 
+/** Packet centers stay inset while the *visible connector* touches the artwork. */
+export function pointOnRouteInset(route:Route,fraction:number,inset=PACKET_CLEARANCE):Point|null {
+  if(!Number.isFinite(route.length)||route.length<inset*2)return null
+  const time=Math.max(0,Math.min(1,fraction))
+  return pointOnRoute(route,(inset+(route.length-inset*2)*time)/route.length)
+}
+
 /** Convert a polyline to an SVG path. */
 export function routeToPath(route: Route): string {
   return route.points.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
@@ -179,4 +197,41 @@ export function routeIsClear(route: Route, nodes: readonly RoutedNode[], fromId:
       return !diagonalCutsBox(a,p,rect)
     })
   })
+}
+
+
+/**
+ * Reference-inspired isometric connectors. Unlike Cartesian 90° elbows,
+ * the candidate route uses ±1:2 diagonals, derived from two projected axes.
+ * This is independently authored and retains the legacy safe router as fallback.
+ */
+export function routeIsometricConnection(source:RoutedNode,target:RoutedNode,nodes:readonly RoutedNode[]):Route|null {
+  const fallback=routeConnection(source,target,nodes)
+  if(!fallback)return null
+  const dx=target.x-source.x, dy=target.y-source.y
+  if(Math.abs(dx)<140 || Math.abs(dy/ dx) > .46) return fallback
+  const obstacles=nodes.filter(node=>node.id!==source.id&&node.id!==target.id).map(expanded)
+  const candidates:Route[]=[]
+  for(const firstSlope of [.5,-.5]){
+    const secondSlope=-firstSlope
+    const firstDx=(dy-secondSlope*dx)/(firstSlope-secondSlope)
+    const fraction=firstDx/dx
+    if(fraction<.22||fraction>.78)continue
+    const bend={x:source.x+firstDx,y:source.y+firstSlope*firstDx}
+    const first=silhouettePort(source,bend),last=silhouettePort(target,bend)
+    if(!first||!last)continue
+    const points=cleanPoints([first,bend,last])
+    if(points.length<3)continue
+    if(points.slice(1).some((p,i)=>obstacles.some(obstacle=>diagonalCutsBox(points[i],p,obstacle))))continue
+    const route={points,length:routeLength(points)}
+    if(route.length > fallback.length*1.4)continue
+    // A packet marker must be outside BOTH endpoint silhouettes at every frame.
+    const safe=Array.from({length:31},(_,i)=>pointOnRouteInset(route,i/30)).every(point=>point&&
+      distanceToSilhouette(point,source)>=PACKET_RADIUS+PACKET_STROKE/2-.5 &&
+      distanceToSilhouette(point,target)>=PACKET_RADIUS+PACKET_STROKE/2-.5)
+    if(safe)candidates.push(route)
+  }
+  // Stable deterministic ordering with shorter path preference.
+  candidates.sort((a,b)=>a.length-b.length || a.points[1].y-b.points[1].y)
+  return candidates[0]??fallback
 }

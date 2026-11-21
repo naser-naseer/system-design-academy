@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { curriculumModules, lessonById, lessons, parseAcademyRoute } from './curriculum/catalog'
 import { Scene } from './scene-engine/Scene'
 import './App.css'
+import './visual-system.css'
 
 const themeKey = 'sda:theme:v1'
 const progressKey = 'sda:progress:v2'
@@ -31,6 +32,13 @@ function App(){
   useEffect(()=>{try{localStorage.setItem(progressKey,JSON.stringify(completed))}catch{/* storage optional */}},[completed])
   useEffect(()=>{const onKey=(event:KeyboardEvent)=>{
     const target=event.target as HTMLElement|null
+    // Browsers can reserve Ctrl+K. Slash is an additional in-page search shortcut.
+    if (!searchOpen && event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey &&
+        !target?.matches('input,textarea,select,[contenteditable="true"]')) {
+      event.preventDefault()
+      setSearchOpen(true)
+      return
+    }
     if(event.ctrlKey||event.metaKey){if(event.key.toLowerCase()==='k'){event.preventDefault();setSearchOpen(open=>!open)}return}
     if(searchOpen||target?.matches('input,textarea,select,[contenteditable="true"]')){
       if(event.key==='Escape')setSearchOpen(false)
@@ -45,6 +53,12 @@ function App(){
   const searchResults=curriculumModules.flatMap(module=>module.topics.map(topic=>({...topic,module:module.title,lesson:lessons.find(item=>item.topicId===topic.id)})))
     .filter(topic=>`${topic.name} ${topic.module}`.toLowerCase().includes(query.toLowerCase())).slice(0,12)
   const totalTopics=curriculumModules.reduce((count,module)=>count+module.topics.length,0)
+  const outcomeRows = lesson.id === 'hld-lld' ? [
+    {label:'Understand system-level ownership',step:2},
+    {label:'Explain architecture trade-offs',step:3},
+    {label:'Specify component-level behavior',step:4},
+    {label:'Reconcile contracts and failure modes',step:6},
+  ] : lesson.steps.slice(0,4).map((part,index)=>({label:part.visual?.outcome ?? part.title,step:index+1}))
   function markCompleted(){setCompleted(previous=>previous.includes(lesson.id)?previous:[...previous,lesson.id])}
   return <div className="app-shell">
     <header className="topbar"><a href="#/" className="brand"><span className="brand-icon">◇</span><span>SYSTEM DESIGN <em>ACADEMY</em></span></a>
@@ -69,18 +83,48 @@ function App(){
       <div className="overview-stats"><div><strong>{String(curriculumModules.length).padStart(2,'0')}</strong><span>Modules mapped</span></div><div><strong>{totalTopics}</strong><span>Topics planned</span></div><div><strong>{String(lessons.length).padStart(2,'0')}</strong><span>Lessons available</span></div></div>
       <div className="lesson-catalog">{lessons.map(item=><button className="lesson-card" key={item.id} onClick={()=>go(item.id)}><strong>{item.title}</strong><span>{item.steps.length} interactive steps · {completed.includes(item.id)?'Completed':'Open lesson'}</span><small>{item.subtitle}</small></button>)}</div><p className="disclaimer">Early access · Additional topics will be released incrementally.</p>
     </div>:<>
-      <div className="lesson-head"><div><span className="eyebrow">{lesson.moduleId.toUpperCase()} / INTERACTIVE LESSON</span><h1>{lesson.title}</h1><p>{lesson.subtitle}</p></div><span className="step-pill">STEP {String(route.step).padStart(2,'0')} / {lesson.steps.length}</span></div>
-      <div className="player-grid"><div className="canvas-panel"><div className="panel-top"><span>◈ ARCHITECTURE VISUALIZER</span><span className="live-dot">● {playing?'PLAYING':'PAUSED'}</span></div>
-        <Scene step={step} playing={playing} replayKey={replayKey}/><div className="controls"><button disabled={route.step===1} onClick={()=>go(lesson.id,route.step-1)}>← Previous</button>
-        <button aria-label="Replay animation" onClick={()=>{setReplayKey(value=>value+1);setPlaying(true)}}>↺ Replay</button>
-        <button aria-label={playing?'Pause animation':'Play animation'} onClick={()=>setPlaying(value=>!value)}>{playing?'Ⅱ Pause':'▶ Play'}</button>
-        <button className="next" disabled={route.step===lesson.steps.length} onClick={()=>go(lesson.id,route.step+1)}>Next step →</button></div></div>
-        <article className="explanation"><span className={`category ${step.category}`}>{step.category.toUpperCase()}</span><h2>{step.title}</h2><p>{step.body}</p>
-          {step.metric&&<div className="metric">{step.metric}<small>Example / assumption — not live metrics</small></div>}
-          <div className="takeaway"><span>KEY TAKEAWAY</span><strong>{step.takeaway}</strong></div>
+      <div className="lesson-head"><div><span className="eyebrow">{lesson.moduleId.toUpperCase()} / LESSON  ·  {lesson.steps.length} STEPS</span><h1>{lesson.title}</h1><p>{lesson.subtitle}</p></div><span className="step-pill">STEP {String(route.step).padStart(2,'0')} / {lesson.steps.length}</span></div>
+      <div className="player-grid"><div className="lesson-visual-column">
+        <section className="canvas-panel" aria-label="Interactive architecture visualization">
+          <div className="panel-top"><span>◈ ARCHITECTURE VISUALIZER</span><div className="panel-actions"><span className="live-dot">● {playing?'PLAYING':'PAUSED'}</span>
+            <button aria-label="Replay animation" onClick={()=>{setReplayKey(value=>value+1);setPlaying(true)}}>↺ Replay</button>
+            <button aria-label={playing?'Pause animation':'Play animation'} onClick={()=>setPlaying(value=>!value)}>{playing?'Ⅱ Pause':'▶ Play'}</button>
+          </div></div>
+          <Scene step={step} playing={playing} replayKey={replayKey}/>
+        </section>
+        <nav className="lesson-stepper" aria-label="Navigate lesson steps">
+          <div className="lesson-stepper-head"><strong>IN THIS LESSON</strong><span>Step {route.step} of {lesson.steps.length}</span></div>
+          <div className="lesson-stepper-track">{lesson.steps.map((part,index)=><button type="button" key={part.id}
+            className={route.step===index+1?'current':route.step>index+1?'visited':''}
+            aria-current={route.step===index+1?'step':undefined} onClick={()=>go(lesson.id,index+1)}>
+            <span>{index+1}</span><small>{part.visual?.stepLabel ?? part.title}</small>
+          </button>)}</div>
+        </nav>
+      </div>
+        <div className="lesson-right-column"><article className="explanation"><div className="side-step">STEP {route.step} / {lesson.steps.length} <span className={`category ${step.category}`}>{step.category.toUpperCase()}</span></div>
+          <h2>{step.title}</h2><p>{step.body}</p>
+          {step.metric&&<div className="metric">{step.metric}<small>Illustrative example · not live metrics</small></div>}
+          <div className="takeaway"><span>KEY IDEA</span><strong>{step.takeaway}</strong></div>
+          {step.visual?.changes?.length ? <section className="step-changes" aria-label="What changed in this step">
+            <h3>WHAT CHANGED</h3>
+            {step.visual.changes.map((change,index)=><div key={index}><span>↝</span>{change}</div>)}
+          </section> : null}
           {route.step===lesson.steps.length&&<button className="primary complete" onClick={markCompleted}>{completed.includes(lesson.id)?'✓ Lesson completed':'Mark lesson complete ✓'}</button>}
-          <div className="shortcuts">← → Navigate · Space Pause · R Replay</div></article></div>
-      <div className="lesson-progress" aria-label={`${route.step} of ${lesson.steps.length} steps`}><div style={{width:`${route.step/lesson.steps.length*100}%`}}/></div>
+          <div className="side-spacer"/>
+          <div className="side-actions"><button disabled={route.step===1} onClick={()=>go(lesson.id,route.step-1)}>← Back</button>
+            <button className="next" disabled={route.step===lesson.steps.length} onClick={()=>go(lesson.id,route.step+1)}>Next step →</button></div>
+          <div className="shortcuts">← → Navigate · Space Pause · R Replay</div>
+        </article>
+        <aside className="lesson-outcomes" aria-label="Learning outcomes">
+          <div className="outcomes-header"><strong>YOU WILL LEARN</strong><span>{route.step} / {lesson.steps.length}</span></div>
+          <div className="outcomes-list">
+            {outcomeRows.map((item,index)=><button key={index} type="button" onClick={()=>go(lesson.id,item.step)} aria-pressed={route.step>=item.step}>
+              <span className={route.step>=item.step?'outcome-done':'outcome-pending'} aria-hidden="true">{route.step>=item.step?'✓':''}</span>
+              <span>{item.label}</span>
+            </button>)}
+          </div>
+        </aside>
+        </div></div>
     </>}</main></div>
     {searchOpen&&<div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setSearchOpen(false)}}>
       <div className="search-dialog" role="dialog" aria-modal="true" aria-label="Search curriculum"><div className="search-input"><span>⌕</span><input autoFocus placeholder="Search topics and modules…" value={query} onChange={event=>setQuery(event.target.value)}

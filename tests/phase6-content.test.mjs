@@ -1,14 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { lessons, lessonById, curriculumModules, parseAcademyRoute } from '../src/curriculum/catalog.ts'
-import { evaluateTimeline, validateTimeline } from '../src/scene-engine/timeline.ts'
+import { evaluateTimeline, validateTimeline, effectiveTimeline } from '../src/scene-engine/timeline.ts'
 import { routeConnection, routeIsClear } from '../src/scene-engine/routing.ts'
 
-test('five unique accessible lessons have expected number of steps',()=>{
- assert.equal(lessons.length,5)
+test('six unique accessible lessons preserve the original material and expand HLD/LLD',()=>{
+ assert.equal(lessons.length,6)
  assert.equal(new Set(lessons.map(x=>x.id)).size,lessons.length)
- assert.equal(lessons[0].steps.length,12)
- for(const lesson of lessons.slice(1))assert.equal(lesson.steps.length,6,lesson.id)
+ assert.equal(lessons[0].steps.length,8)
+ assert.equal(lessons[1].steps.length,12)
+ for(const lesson of lessons.slice(2))assert.equal(lesson.steps.length,6,lesson.id)
 })
 test('catalog mapping is aligned with the sidebar topic IDs',()=>{
  for(const lesson of lessons){
@@ -17,7 +18,8 @@ test('catalog mapping is aligned with the sidebar topic IDs',()=>{
  }
 })
 test('deep links parse correctly and reject invalid steps and names',()=>{
- assert.deepEqual(parseAcademyRoute('#/hld-lld/12'),{view:'lesson',lessonId:'hld-lld',step:12})
+ assert.deepEqual(parseAcademyRoute('#/hld-lld/8'),{view:'lesson',lessonId:'hld-lld',step:8})
+ assert.deepEqual(parseAcademyRoute('#/hld-lld/12'),{view:'lesson',lessonId:'url-shortener-architecture',step:12})
  for(const lesson of lessons.slice(1)) assert.equal(parseAcademyRoute(`#/${lesson.id}/3`).view,'lesson')
  for(const url of ['#/unknown/2','#/caching/7','#/load-balancing/0','#/caching/abc'])assert.equal(parseAcademyRoute(url).view,'not-found')
 })
@@ -38,7 +40,7 @@ test('timeline evaluation stable at arbitrary seek positions and reduced-motion 
   evaluateTimeline(step,3500)
   assert.deepEqual(evaluateTimeline(step,1250),a,step.id)
   const end=evaluateTimeline(step,0,true)
-  assert.equal(end.timeMs,step.timeline.durationMs,step.id)
+  assert.equal(end.timeMs,effectiveTimeline(step).durationMs,step.id)
  }
 })
 test('routed paths are clear of unrelated scene nodes',()=>{

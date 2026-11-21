@@ -1,6 +1,7 @@
 export interface SceneNode { id: string; label: string; kind: 'client'|'gateway'|'service'|'cache'|'database'|'component'|'monitor'; x: number; y: number; status?: 'active'|'idle'|'failed' }
 export interface SceneEdge { from: string; to: string; label?: string }
-export interface LessonStep { id: string; title: string; category: 'setup'|'problem'|'technique'|'solution'|'insight'|'tradeoff'|'recap'; body: string; takeaway: string; nodes: SceneNode[]; edges: SceneEdge[]; activeEdge?: number; metric?: string; timeline?: import('../scene-engine/timeline').TimelineDefinition }
+export interface LessonVisual { stepLabel: string; zoomLevel: string; buildingBlocks: string; deliverable: string; changes: string[]; outcome: string }
+export interface LessonStep { id: string; title: string; category: 'setup'|'problem'|'technique'|'solution'|'insight'|'tradeoff'|'recap'; body: string; takeaway: string; nodes: SceneNode[]; edges: SceneEdge[]; activeEdge?: number; metric?: string; timeline?: import('../scene-engine/timeline').TimelineDefinition; visual?: LessonVisual }
 export interface Topic { id: string; name: string; available: boolean }
 export interface Module { id: string; title: string; topics: Topic[] }
 const topics = (items: string) => items.split('|').map((name, i) => ({id: name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''),name,available:false,index:i}));

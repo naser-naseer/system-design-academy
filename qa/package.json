@@ -1,0 +1,16 @@
+{
+  "name": "system-design-academy-browser-qa",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test --config=playwright.config.mjs",
+    "test:desktop": "playwright test --config=playwright.config.mjs --project=desktop-chromium",
+    "test:mobile": "playwright test --config=playwright.config.mjs --project=mobile-chromium",
+    "report": "playwright show-report playwright-report",
+    "capture": "node capture-review.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0"
+  }
+}

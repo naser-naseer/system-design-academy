@@ -7,4 +7,7 @@ for(let i=1;i<=12;i++)assert.match(s,new RegExp(`step-${String(i).padStart(2,'0'
 for(const id of ['foundations','scaling','data','communication','reliability','architecture','security','shipping','whole'])assert.match(s,new RegExp(`id:'${id}'`))
 assert.match(app,/Mark lesson complete/)
 assert.match(app,/setSearchOpen/)
-console.log('Content smoke checks passed: 9 module definitions, 12 HLD/LLD steps, player and search wired.')
+const commerce=readFileSync(new URL('../src/curriculum/commerce-hld-lld.ts',import.meta.url),'utf8')
+for(let i=1;i<=8;i++)assert.match(commerce,new RegExp(`commerce-${String(i).padStart(2,'0')}`))
+assert.match(app,/lesson-outcomes/)
+console.log('Content smoke checks passed: nine modules, eight commerce HLD/LLD steps, preserved twelve URL shortener steps, six lessons, player and search wired.')
